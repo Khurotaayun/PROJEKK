@@ -1,103 +1,32 @@
-# app.py
+import streamlit as st
+import torch
+from PIL import Image
+import os
 import pathlib
 temp = pathlib.PosixPath
 pathlib.PosixPath = pathlib.WindowsPath
-import streamlit as st
-import cv2
-import torch
-import numpy as np
-from PIL import Image
-import time
-import threading
-from playsound import playsound
 
-# ⚠️ WAJIB paling atas sebelum perintah Streamlit lain
-st.set_page_config(page_title="Deteksi Drowsy Realtime", layout="centered")
+st.title("YOLOv5 Object Detection")
+st.markdown("Upload gambar untuk deteksi menggunakan model kamu.")
 
-# Fungsi untuk mainkan suara alarm
-def mainkan_suara_drowsy():
-    threading.Thread(target=lambda: playsound("C:/Users/lenovvo/alarm-restricted-access-355278.mp3")).start()
+# Tentukan path ke folder root YOLOv5 (yang ada hubconf.py)
+# __file__ = path ke app.py, lalu naik satu folder ke root YOLOv5
+repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 
-# Load YOLOv5 model hanya sekali
-@st.cache_resource
-def load_model():
-    model = torch.hub.load(
-        'ultralytics/yolov5', 'custom',
-        path=r"C:\Users\lenovvo\Downloads\your_repo\best.pt",
-        force_reload=False,
-        device='cpu'
-    )
-    return model
+# Path lengkap ke model best.pt di subfolder repo/
+model_path = os.path.join(os.path.dirname(__file__), 'best.pt')
 
-model = load_model()
+# Load model YOLOv5 dengan source lokal (repo_root ada hubconf.py)
+model = torch.hub.load(repo_root, 'custom', path=model_path, source='local', force_reload=True)
 
-# UI
-st.title("🚨 Deteksi Drowsy (Mengantuk) Realtime")
-st.markdown("Klik tombol **Start Deteksi** untuk mengaktifkan kamera dan memulai deteksi mata mengantuk secara langsung.")
+# Upload gambar
+uploaded_file = st.file_uploader("Pilih gambar", type=["jpg", "jpeg", "png"])
 
-# Simpan status di session_state
-if 'deteksi_aktif' not in st.session_state:
-    st.session_state.deteksi_aktif = False
+if uploaded_file is not None:
+    image = Image.open(uploaded_file).convert('RGB')
+    st.image(image, caption='Gambar Diupload', use_column_width=True)
 
-# Tombol kontrol kamera
-col1, col2 = st.columns(2)
-with col1:
-    if st.button("▶️ Start Deteksi"):
-        st.session_state.deteksi_aktif = True
-with col2:
-    if st.button("⏹️ Stop"):
-        st.session_state.deteksi_aktif = False
-
-# Tampilkan frame webcam
-FRAME_WINDOW = st.image([])
-
-# Parameter deteksi
-cooldown = 3
-last_sound_time = 0
-frame_drowsy_tidak_terdeteksi = 0
-drowsy_active = False
-CONFIDENCE_THRESHOLD = 0.3
-
-# Jalankan deteksi jika tombol Start ditekan
-if st.session_state.deteksi_aktif:
-    cap = cv2.VideoCapture(0)
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-
-    st.success("📸 Kamera aktif. Deteksi berjalan...")
-
-    while st.session_state.deteksi_aktif:
-        ret, frame = cap.read()
-        if not ret:
-            st.error("❌ Tidak bisa membaca frame dari kamera.")
-            break
-
-        results = model(frame)
-        df = results.pandas().xyxy[0]
-        frame_bgr = np.squeeze(results.ims[0])
-        frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
-
-        current_time = time.time()
-        drowsy_detected = False
-
-        for i, row in df.iterrows():
-            if row['name'] == 'drowsy' and row['confidence'] > CONFIDENCE_THRESHOLD:
-                drowsy_detected = True
-                break
-
-        if drowsy_detected:
-            frame_drowsy_tidak_terdeteksi = 0
-            if not drowsy_active or (current_time - last_sound_time > cooldown):
-                mainkan_suara_drowsy()
-                last_sound_time = current_time
-                drowsy_active = True
-        else:
-            frame_drowsy_tidak_terdeteksi += 1
-            if frame_drowsy_tidak_terdeteksi >= 10:
-                drowsy_active = False
-
-        FRAME_WINDOW.image(frame_rgb)
-
-    cap.release()
-else:
-    st.info("Klik 'Start Deteksi' untuk memulai.")
+    with st.spinner('Sedang mendeteksi...'):
+        results = model(image)
+        results.render()
+        st.image(results.ims[0], caption='Hasil Deteksi', use_column_width=True)
